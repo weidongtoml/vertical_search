@@ -69,10 +69,10 @@ class SimpleHandler(BaseHTTPRequestHandler):
 
 
     def get_list_of(self, field):
-        return [(a['_id'], a['count']) for a in self.db_collection_.aggregate([
+        options = [(a['_id'], a['count']) for a in self.db_collection_.aggregate([
             {"$unwind": "$" + field},
-            {'$group': {"_id": "$" + field, "count": {"$sum": 1}}},
-            {"$sort": SON([("_id", -1), ("count", -1)])}])]
+            {'$group': {"_id": "$" + field, "count": {"$sum": 1}}}])]
+        return sorted(options, key=lambda x: x[0])
 
 
     def render_pagination(self, params, result):
@@ -101,12 +101,16 @@ class SimpleHandler(BaseHTTPRequestHandler):
 
         filters_html += self.render_pagination(params, result)
 
+        title_text = params['TitleText'] if 'TitleText' in params.keys() else ''
+        print('TitleText:', title_text)
+
         form_html = """
         <form action="" method="get">
             %s
+            <div><label>Search Title:</label><input type="text" name="TitleText" value="%s"></input></div>
             <input type="submit" value="Search"></input>
         </form>
-        """ %(filters_html)
+        """ %(filters_html, title_text)
 
         return form_html
 
@@ -121,6 +125,11 @@ class SimpleHandler(BaseHTTPRequestHandler):
         start = cur_page * self.NUM_RESULT_PER_PAGE
         end = (cur_page + 1) * self.NUM_RESULT_PER_PAGE
 
+        title_text = params['TitleText'] if 'TitleText' in params.keys() else ''
+        if title_text != '':
+            search_params['$text'] = {'$search': title_text, '$caseSensitive': False}
+            self.db_collection_.create_index([('Title', 'text')])
+
         result = self.db_collection_.find(search_params)[start:end]
 
         return result
@@ -128,11 +137,16 @@ class SimpleHandler(BaseHTTPRequestHandler):
     def render_result(self, result):
         result_html = '<p>Total number of videos found:  %d</p>' % (result.count())
         for r in result:
+            episodes_html = ''
+            for episode in sorted(r['Episodes'],key=lambda x: x['Name']):
+                link = episode['VideoUrl'] if 'VideoUrl' in episode.keys() else episode['Url']
+                episodes_html += '<tr><td><a href="%s" target="_blank">%s</td></tr>' % (link, episode['Name'])
+
             result_html += """
             <div>
             <table><tr><td>
-                <a href="%s">
-                <img src="%s" width="300px" />
+                <a href="%s" target="_blank" >
+                <img src="%s" width="300px"/>
                 </a>
                 </td>
                 <td>
@@ -144,12 +158,15 @@ class SimpleHandler(BaseHTTPRequestHandler):
                 <tr><td>Cast:</td><td>%s</td></tr>
                 <tr><td>Type:</td><td>%s</td></tr>
                 <tr><td>Status:</td><td>%s</td></tr>
+                %s
             </table>
             </td>
             </tr></table>
             </div>
             <hr/>
-            """ % ('https://gogodramaonline.com/info/' + r['Title'].replace(' ', '-'), r['ImageUrl'], r['Title'], r['Country'], r['Released'], r['Genre'], r['Tagges as'], r['Type'], r['Status'])
+            """ % ('https://gogodramaonline.com/info/' + r['Title'].replace(' ', '-'),
+                   r['ImageUrl'], r['Title'], r['Country'], r['Released'], r['Genre'],
+                   r['Tagges as'], r['Type'], r['Status'], episodes_html)
 
         return result_html
 
